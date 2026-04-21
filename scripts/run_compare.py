@@ -186,6 +186,36 @@ if __name__ == "__main__":
     BASE_SAVE = args.save_path or DATA_NAME.replace(".csv", "")
 
     SEQ_LEN_LIST = [96, 336, 512]
+    D_LAYERS_LIST = [1, 2, 4, 8]
+
+    NEW_MODELS = [
+        {
+            "name": "MoFo_Circulant",
+            "model_name": "time_series_library.MoFo_Circulant",
+            "adapter": "MoFo_Circulant_adapter",
+            "extra_hyper": {"lambda_init": 0.1, "use_causal_mask": False},
+            "tag": "Circulant",
+        },
+        {
+            "name": "MoFo_CircBias",
+            "model_name": "time_series_library.MoFo_CircBias",
+            "adapter": "MoFo_CircBias_adapter",
+            "extra_hyper": {"lambda_init": 0.1, "use_causal_mask": False},
+            "tag": "CircBias",
+        },
+        {
+            "name": "MoFo_Circulant_DualPath",
+            "model_name": "time_series_library.MoFo_Circulant_DualPath",
+            "adapter": "MoFo_Circulant_DP_adapter",
+            "extra_hyper": {
+                "lambda_init": 0.1, "use_causal_mask": False,
+                "use_dual_path": True, "decomp_mode": "stl",
+                "dual_path_period": 0, "trend_mode": "mlp",
+                "dual_path_alpha_init": 0.5,
+            },
+            "tag": "DualPath",
+        },
+    ]
 
     all_results = {}
 
@@ -200,29 +230,8 @@ if __name__ == "__main__":
             "norm": True, "seq_len": seq_len, "patience": 10,
             "periodic": 24, "bias": 1, "cias": 1
         })
-        circulant_hyper = json.dumps({
-            "batch_size": 16, "d_model": 24, "horizon": 96, "lr": 0.01,
-            "norm": True, "seq_len": seq_len, "patience": 10,
-            "periodic": 24, "bias": 1, "cias": 1,
-            "lambda_init": 0.1, "use_causal_mask": False
-        })
-        dualpath_hyper = json.dumps({
-            "batch_size": 16, "d_model": 24, "horizon": 96, "lr": 0.01,
-            "norm": True, "seq_len": seq_len, "patience": 10,
-            "periodic": 24, "bias": 1, "cias": 1,
-            "lambda_init": 0.1, "use_causal_mask": False,
-            "use_dual_path": True, "decomp_mode": "stl",
-            "dual_path_period": 0, "trend_mode": "mlp",
-            "dual_path_alpha_init": 0.5
-        })
-        circbias_hyper = json.dumps({
-            "batch_size": 16, "d_model": 24, "horizon": 96, "lr": 0.01,
-            "norm": True, "seq_len": seq_len, "patience": 10,
-            "periodic": 24, "bias": 1, "cias": 1,
-            "lambda_init": 0.1, "use_causal_mask": False
-        })
 
-        print(f"[1/4] Running Original MoFo (seq_len={seq_len}) ...")
+        print(f"Running Original MoFo (seq_len={seq_len}) ...")
         run_single_model(
             args,
             model_name="time_series_library.MoFo",
@@ -231,38 +240,28 @@ if __name__ == "__main__":
             save_sub_path=f"{BASE_SAVE}/MoFo_sl{seq_len}",
         )
 
-        print(f"[2/4] Running MoFo_Circulant (seq_len={seq_len}) ...")
-        run_single_model(
-            args,
-            model_name="time_series_library.MoFo_Circulant",
-            adapter="MoFo_Circulant_adapter",
-            model_hyper_params=circulant_hyper,
-            save_sub_path=f"{BASE_SAVE}/MoFo_Circulant_sl{seq_len}",
-        )
+        for d_layers in D_LAYERS_LIST:
+            for mdl in NEW_MODELS:
+                hyper_dict = {
+                    "batch_size": 16, "d_model": 24, "horizon": 96, "lr": 0.01,
+                    "norm": True, "seq_len": seq_len, "patience": 10,
+                    "periodic": 24, "bias": 1, "cias": 1,
+                    "d_layers": d_layers,
+                }
+                hyper_dict.update(mdl["extra_hyper"])
+                hyper_str = json.dumps(hyper_dict)
 
-        print(f"[3/4] Running MoFo_CircBias (seq_len={seq_len}) ...")
-        run_single_model(
-            args,
-            model_name="time_series_library.MoFo_CircBias",
-            adapter="MoFo_CircBias_adapter",
-            model_hyper_params=circbias_hyper,
-            save_sub_path=f"{BASE_SAVE}/MoFo_CircBias_sl{seq_len}",
-        )
-
-        print(f"[4/4] Running MoFo_Circulant_DualPath (seq_len={seq_len}) ...")
-        run_single_model(
-            args,
-            model_name="time_series_library.MoFo_Circulant_DualPath",
-            adapter="MoFo_Circulant_DP_adapter",
-            model_hyper_params=dualpath_hyper,
-            save_sub_path=f"{BASE_SAVE}/MoFo_Circulant_DP_sl{seq_len}",
-        )
+                save_tag = f"{mdl['tag']}_L{d_layers}_sl{seq_len}"
+                print(f"Running {mdl['name']} (d_layers={d_layers}, seq_len={seq_len}) ...")
+                run_single_model(
+                    args,
+                    model_name=mdl["model_name"],
+                    adapter=mdl["adapter"],
+                    model_hyper_params=hyper_str,
+                    save_sub_path=f"{BASE_SAVE}/{save_tag}",
+                )
 
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        mofe_dir = os.path.join(root_dir, "result", f"{BASE_SAVE}/MoFo_sl{seq_len}")
-        circ_dir = os.path.join(root_dir, "result", f"{BASE_SAVE}/MoFo_Circulant_sl{seq_len}")
-        cb_dir = os.path.join(root_dir, "result", f"{BASE_SAVE}/MoFo_CircBias_sl{seq_len}")
-        dp_dir = os.path.join(root_dir, "result", f"{BASE_SAVE}/MoFo_Circulant_DP_sl{seq_len}")
 
         def _load_latest_metrics(res_dir):
             if not os.path.isdir(res_dir):
@@ -280,47 +279,71 @@ if __name__ == "__main__":
                     metrics[row['metric_name']] = v if pd.notna(v) else float('nan')
             return metrics
 
-        m1 = _load_latest_metrics(mofe_dir)
-        m2 = _load_latest_metrics(circ_dir)
-        m3 = _load_latest_metrics(cb_dir)
-        m4 = _load_latest_metrics(dp_dir)
-        all_results[seq_len] = (m1, m2, m3, m4)
+        mofe_dir = os.path.join(root_dir, "result", f"{BASE_SAVE}/MoFo_sl{seq_len}")
+        m_mofe = _load_latest_metrics(mofe_dir)
 
-        if m1 and m2 and m3 and m4:
-            all_keys = sorted(set(m1.keys()) | set(m2.keys()) | set(m3.keys()) | set(m4.keys()))
+        model_metrics = {}
+        for d_layers in D_LAYERS_LIST:
+            for mdl in NEW_MODELS:
+                save_tag = f"{mdl['tag']}_L{d_layers}_sl{seq_len}"
+                res_dir = os.path.join(root_dir, "result", f"{BASE_SAVE}/{save_tag}")
+                model_metrics[save_tag] = _load_latest_metrics(res_dir)
+
+        all_results[seq_len] = (m_mofe, model_metrics)
+
+        if m_mofe:
+            all_keys = set(m_mofe.keys())
+            for v in model_metrics.values():
+                if v:
+                    all_keys |= set(v.keys())
+            all_keys = sorted(all_keys)
+
             print()
             print(f"--- seq_len={seq_len} ---")
-            print(f"{'Metric':<25} {'MoFo':>10} {'Circulant':>10} {'CircBias':>10} {'DualPath':>10}")
-            print("-" * 70)
+            header = f"{'Metric':<20} {'MoFo':>10}"
+            for d_layers in D_LAYERS_LIST:
+                for mdl in NEW_MODELS:
+                    header += f" {mdl['tag']}_L{d_layers}:>12"
+            col_names = []
+            for d_layers in D_LAYERS_LIST:
+                for mdl in NEW_MODELS:
+                    col_names.append(f"{mdl['tag']}_L{d_layers}")
+            print(f"{'Metric':<20} {'MoFo':>10} " + " ".join(f"{c:>14}" for c in col_names))
+            print("-" * (30 + 15 * len(col_names)))
             for k in all_keys:
-                v1 = m1.get(k, float('nan'))
-                v2 = m2.get(k, float('nan'))
-                v3 = m3.get(k, float('nan'))
-                v4 = m4.get(k, float('nan'))
-                v1_str = f"{v1:.6f}" if not np.isnan(v1) else "NaN"
-                v2_str = f"{v2:.6f}" if not np.isnan(v2) else "NaN"
-                v3_str = f"{v3:.6f}" if not np.isnan(v3) else "NaN"
-                v4_str = f"{v4:.6f}" if not np.isnan(v4) else "NaN"
-                print(f"{k:<25} {v1_str:>10} {v2_str:>10} {v3_str:>10} {v4_str:>10}")
+                row_str = f"{k:<20}"
+                v1 = m_mofe.get(k, float('nan'))
+                row_str += f" {v1:.6f}" if not np.isnan(v1) else " NaN"
+                for cn in col_names:
+                    m = model_metrics.get(cn)
+                    v = m.get(k, float('nan')) if m else float('nan')
+                    row_str += f" {v:.6f}" if not np.isnan(v) else " NaN"
+                print(row_str)
 
     print()
-    print("=" * 70)
-    print("SUMMARY: MoFo vs MoFo_Circulant vs MoFo_CircBias vs MoFo_Circulant_DualPath")
-    print("=" * 70)
+    print("=" * 80)
+    print("SUMMARY: MoFo vs New Models (1/2/4/8 layers)")
+    print("=" * 80)
     for seq_len in SEQ_LEN_LIST:
-        m1, m2, m3, m4 = all_results.get(seq_len, (None, None, None, None))
-        if m1 and m2 and m3 and m4:
-            all_keys = sorted(set(m1.keys()) | set(m2.keys()) | set(m3.keys()) | set(m4.keys()))
+        m_mofe, model_metrics = all_results.get(seq_len, (None, None))
+        if m_mofe:
+            all_keys = set(m_mofe.keys())
+            for v in model_metrics.values():
+                if v:
+                    all_keys |= set(v.keys())
+            all_keys = sorted(all_keys)
             print(f"\n  seq_len = {seq_len}")
             for k in all_keys:
-                v1 = m1.get(k, float('nan'))
-                v2 = m2.get(k, float('nan'))
-                v3 = m3.get(k, float('nan'))
-                v4 = m4.get(k, float('nan'))
+                v1 = m_mofe.get(k, float('nan'))
                 v1_str = f"{v1:.6f}" if not np.isnan(v1) else "NaN"
-                v2_str = f"{v2:.6f}" if not np.isnan(v2) else "NaN"
-                v3_str = f"{v3:.6f}" if not np.isnan(v3) else "NaN"
-                v4_str = f"{v4:.6f}" if not np.isnan(v4) else "NaN"
-                print(f"    {k:<25} MoFo: {v1_str}  Circulant: {v2_str}  CircBias: {v3_str}  DualPath: {v4_str}")
+                parts = [f"MoFo: {v1_str}"]
+                for d_layers in D_LAYERS_LIST:
+                    for mdl in NEW_MODELS:
+                        tag = f"{mdl['tag']}_L{d_layers}_sl{seq_len}"
+                        m = model_metrics.get(tag)
+                        v = m.get(k, float('nan')) if m else float('nan')
+                        vs = f"{v:.6f}" if not np.isnan(v) else "NaN"
+                        parts.append(f"{mdl['tag']}_L{d_layers}: {vs}")
+                print(f"    {k:<25} " + "  ".join(parts))
     print()
-    print("=" * 70)
+    print("=" * 80)
